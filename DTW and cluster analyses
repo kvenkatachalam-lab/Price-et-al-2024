@@ -1,0 +1,154 @@
+# load dependencies and libraries
+library(tidyverse)
+library(readr)
+library(proxy)
+library(dtw)
+library(dendextend)
+library(viridisLite)
+library(gplots)
+library(plotrix)
+library(CausalImpact)
+library(varhandle)
+library(MESS)
+
+setwd("~/") #sets working directory
+folder <- "xyz" #name of sub-folder and file
+input_path <- "abc" #file path
+
+trace_table <- read_csv(paste0(input_path,"/",folder,"/",folder,".csv")) #time series data input
+
+ctrl <- trace_table
+breaks <- seq(min(trace_table[,-c(1,2)]),max(trace_table[,-c(1,2)]),length.out=257)
+
+#the following section separates the time series into periods before and after treatment
+pre <- as.matrix(ctrl[c(1:(which(ctrl$...1==1)-1)),-c(1:2)])
+post <- as.matrix(ctrl[-c(1:(which(ctrl$...1==1)-1)),-c(1:2)])
+
+# pre analyses
+suppressWarnings(dir.create(paste0(input_path,"/",folder,"/pre")))
+
+dist_matrix <- proxy::dist(pre, method = "DTW",by_rows = F)
+
+hc2 <- hclust(dist_matrix, method="ward.D2") 
+dend1 <-as.dendrogram(hc2)
+number_clusters = find_k(dend1)
+mycl <- cutree(hc2, k=number_clusters$nc,order_clusters_as_data = FALSE)
+dend1a = color_branches(dend1,k=number_clusters$nc,groupLabels=TRUE)
+
+mycol <- viridis(256, alpha = 1, begin = 0, end = 1, direction = 1, option = "C")
+pdf(file=paste0(input_path,"/",folder,"/pre/",folder,"_pre_clusters.pdf"))
+suppressWarnings(heatmap.2(pre, Rowv=NA, Colv=dend1a, symm=FALSE, col=mycol, density.info="none", trace="none",breaks = breaks) ) 
+dev.off()
+
+mycl2 <- as.data.frame(mycl)
+mycl2 <-cbind(rownames(mycl2),mycl2)
+row.names(mycl2) <- NULL
+mycl2 <- mycl2 %>% arrange(`rownames(mycl2)`)
+
+write.csv(mycl2,paste0(input_path,"/",folder,"/pre/",folder,"_pre_clusters.csv"))
+
+for (i in 1:length(unique(mycl2$mycl))){
+  mycl3 <- filter(mycl2,mycl2$mycl==i)
+  trace_table3 <- trace_table[,c(1:2,which(colnames(trace_table) %in% mycl3$`rownames(mycl2)`))]
+  
+  write.csv(trace_table3,paste0(input_path,"/",folder,"/pre/",folder,"_pre_cluster_",i,"_trace_table.csv"))
+  
+  ctrl3 <- trace_table3[,c(2)]
+  ctrl3[,2]<-rowMeans(trace_table3[,-c(1:2)])
+  for (m in 1:nrow(trace_table3)){
+    ctrl3[m,3]<-std.error(t(trace_table3[c(m),-c(1:2)]))
+  }
+  colnames(ctrl3)<-c("time","mean","SEM")
+  write.csv(ctrl3,paste0(input_path,"/",folder,"/pre/",folder,"_pre_cluster_",i,"_trace.csv"))
+
+  area_list_ctrl <- as.data.frame(matrix(0,nrow=0,ncol=1))
+  for (k in 3:ncol(trace_table3)){
+    precol1 <- as.data.frame(trace_table3[c(1:(which(trace_table3$...1==1)-1)),c(2,k)])
+    colnames(precol1)<-c("time","ratio")
+    col1 <- as.data.frame(trace_table3[c(which(trace_table3$...1==1):nrow(trace_table3)),c(2,k)])
+    colnames(col1)<-c("time","ratio")
+    precol2 <- as.data.frame(rbind(precol1,col1))
+    pre.period <- c(1,nrow(precol1))
+    post.period <- c((nrow(precol1)+1),nrow(precol2))
+    precol2 <- as.data.frame(precol2[,order(ncol(precol2):1)])
+    impact <- CausalImpact(precol2, pre.period, post.period)
+    impact_vals <- as.data.frame(impact$series)
+    impact_vals<- as.data.frame(impact_vals[-c(1:nrow(precol1)),])
+    col1 <- col1 %>% mutate (base=impact_vals$point.pred) 
+    col1 <- unfactor(col1)
+    time1 <- as.numeric(min(col1$time))
+    time2 <- as.numeric(max(col1$time))
+    area1 <- auc(col1$time,col1$ratio,from = time1,to=time2)
+    area2 <- auc(col1$time,col1$base,from = time1,to=time2)
+    area <- as.data.frame((area1-area2)/nrow(col1))
+    colnames(area)<-c("area")
+    colnames(area_list_ctrl)<-colnames(area)
+    area_list_ctrl <- as.data.frame(rbind(area_list_ctrl,area))
+  }
+  write.csv(area_list_ctrl,paste0(input_path,"/",folder,"/pre/",folder,"_pre_cluster_",i,"_AUC.csv"))
+}
+
+# post analyses
+dir.create(paste0(input_path,"/",folder,"/post"))
+
+dist_matrix <- proxy::dist(post, method = "DTW",by_rows = F)
+
+hc2 <- hclust(dist_matrix, method="ward.D2") 
+dend1 <-as.dendrogram(hc2)
+number_clusters = find_k(dend1)
+mycl <- cutree(hc2, k=number_clusters$nc,order_clusters_as_data = FALSE)
+dend1a = color_branches(dend1,k=number_clusters$nc,groupLabels=TRUE)
+
+mycol <- viridis(256, alpha = 1, begin = 0, end = 1, direction = 1, option = "C")
+pdf(file=paste0(input_path,"/",folder,"/post/",folder,"_post_clusters.pdf"))
+suppressWarnings(heatmap.2(post, Rowv=NA, Colv=dend1a, symm=FALSE, col=mycol, density.info="none", trace="none",breaks = breaks)) 
+dev.off()
+
+mycl2 <- as.data.frame(mycl)
+mycl2 <-cbind(rownames(mycl2),mycl2)
+row.names(mycl2) <- NULL
+mycl2 <- mycl2 %>% arrange(`rownames(mycl2)`)
+
+write.csv(mycl2,paste0(input_path,"/",folder,"/post/",folder,"_post_clusters.csv"))
+
+for (i in 1:length(unique(mycl2$mycl))){
+  mycl3 <- filter(mycl2,mycl2$mycl==i)
+  trace_table3 <- trace_table[,c(1:2,which(colnames(trace_table) %in% mycl3$`rownames(mycl2)`))]
+  
+  write.csv(trace_table3,paste0(input_path,"/",folder,"/post/",folder,"_post_cluster_",i,"_trace_table.csv"))
+  
+  ctrl3 <- trace_table3[,c(2)]
+  ctrl3[,2]<-rowMeans(trace_table3[,-c(1:2)])
+  for (m in 1:nrow(trace_table3)){
+    ctrl3[m,3]<-std.error(t(trace_table3[c(m),-c(1:2)]))
+  }
+  colnames(ctrl3)<-c("time","mean","SEM")
+  write.csv(ctrl3,paste0(input_path,"/",folder,"/post/",folder,"_post_cluster_",i,"_trace.csv"))
+  
+  area_list_ctrl <- as.data.frame(matrix(0,nrow=0,ncol=1))
+  for (k in 3:ncol(trace_table3)){
+    precol1 <- as.data.frame(trace_table3[c(1:(which(trace_table3$...1==1)-1)),c(2,k)])
+    colnames(precol1)<-c("time","ratio")
+    col1 <- as.data.frame(trace_table3[c(which(trace_table3$...1==1):nrow(trace_table3)),c(2,k)])
+    colnames(col1)<-c("time","ratio")
+    precol2 <- as.data.frame(rbind(precol1,col1))
+    pre.period <- c(1,nrow(precol1))
+    post.period <- c((nrow(precol1)+1),nrow(precol2))
+    precol2 <- as.data.frame(precol2[,order(ncol(precol2):1)])
+    impact <- CausalImpact(precol2, pre.period, post.period)
+    impact_vals <- as.data.frame(impact$series)
+    impact_vals<- as.data.frame(impact_vals[-c(1:nrow(precol1)),])
+    col1 <- col1 %>% mutate (base=impact_vals$point.pred) 
+    col1 <- unfactor(col1)
+    time1 <- as.numeric(min(col1$time))
+    time2 <- as.numeric(max(col1$time))
+    area1 <- auc(col1$time,col1$ratio,from = time1,to=time2)
+    area2 <- auc(col1$time,col1$base,from = time1,to=time2)
+    area <- as.data.frame((area1-area2)/nrow(col1))
+    colnames(area)<-c("area")
+    colnames(area_list_ctrl)<-colnames(area)
+    area_list_ctrl <- as.data.frame(rbind(area_list_ctrl,area))
+  }
+  write.csv(area_list_ctrl,paste0(input_path,"/",folder,"/post/",folder,"_post_cluster_",i,"_AUC.csv"))
+}
+
