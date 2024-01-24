@@ -10,8 +10,8 @@ library(CausalImpact)
 
 setwd("~/") #sets working directory
 
-input_path <- "Dropbox/Kartik/Ongoing projects/Live cell imaging analyses/bulk analyses" #input files are stored in this folder
-output_path <- "Dropbox/Kartik/Ongoing projects/Live cell imaging analyses/results" #results of the analyses are placed in this folder
+input_path <- "xyz" #input files are stored in this folder
+output_path <- "abc" #results of the analyses are placed in this folder
 
 list2 <- as.data.frame(list.files(path=input_path))
 colnames(list2)<-c("files")
