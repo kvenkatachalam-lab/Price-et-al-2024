@@ -1,0 +1,130 @@
+# load dependencies and libraries
+library(tidyverse)
+library(readr)
+library(keras)
+library(tensorflow)
+
+
+setwd("~/") #sets working directory
+input_path <- "Dropbox/Kartik/Ongoing projects/Live cell imaging analyses/Matt data/Laconic/correlation csv_no bleach" #file path
+folder1 <- "low K -> low K no asp" #control treatment
+folder2 <- "low K -> UK no asp" #experimental treatment
+bonferroni_factor <- 21 #to adjust for pairwise corrections
+
+trace_table1 <- read_csv(paste0(input_path,"/",folder1,"/",folder1,".csv"))
+clusters1 <- read_csv(paste0(input_path,"/",folder1,"/post/",folder1,"_post_clusters.csv")) # this line uses a file that indicates cluster membership for the individual cells
+
+trace_table2 <- read_csv(paste0(input_path,"/",folder2,"/",folder2,".csv"))
+clusters2 <- read_csv(paste0(input_path,"/",folder2,"/post/",folder2,"_post_clusters.csv")) # this line uses a file that indicates cluster membership for the individual cells
+
+# the following section is to trim the traces to the length of the shortest trace
+rem1 <- nrow(trace_table1)-nrow(trace_table2)
+if (rem1!=0){
+  if (rem1>0){
+    rem1 <- abs(rem1)-1
+    trace_table1 <- as.data.frame(trace_table1[-c((nrow(trace_table1)-rem1):nrow(trace_table1)),])
+  } else {
+    rem1 <- abs(rem1)-1
+    trace_table2 <- as.data.frame(trace_table2[-c((nrow(trace_table2)-rem1):nrow(trace_table2)),])
+  }
+}
+
+p_val_matrix<-as.data.frame(matrix(0,nrow=max(clusters1$mycl),ncol=max(clusters2$mycl)))
+rownames(p_val_matrix)<-paste0(folder1,"_",1:max(clusters1$mycl))
+colnames(p_val_matrix)<-paste0(folder2,"_",1:max(clusters2$mycl))
+
+error_matrix<-as.data.frame(matrix(0,nrow=max(clusters1$mycl),ncol=max(clusters2$mycl)+1))
+rownames(error_matrix)<-paste0(folder1,"_",1:max(clusters1$mycl))
+colnames(error_matrix)<-c("reconstruction_error",paste0(folder2,"_",1:max(clusters2$mycl)))
+
+for (i in 1:max(clusters1$mycl)){
+  sample_names <- filter(clusters1,clusters1$mycl==i)
+  ctrl <- trace_table1[,c(which(colnames(trace_table1) %in% sample_names$`rownames(mycl2)`))]
+  
+  data_matrix <- scale(ctrl)
+  original_means <- attr(data_matrix, "scaled:center")
+  original_sds <- attr(data_matrix, "scaled:scale")
+  data_matrix <- t(data_matrix)
+  # Define the size of the input
+  input_size <- dim(data_matrix)[2]
+  
+  # Define the autoencoder model
+  input_layer <- layer_input(shape = c(input_size))
+  
+  # Building the encoder
+  encoder <- input_layer %>%
+    layer_dense(units = 40, activation = 'relu') %>%
+    layer_dropout(rate = 0.2) %>%
+    layer_dense(units = 30, activation = 'relu') %>%
+    layer_dropout(rate = 0.2) %>%
+    layer_dense(units = 20, activation = 'relu')  # Bottleneck layer
+  
+  
+  # Building the decoder
+  decoder <- encoder %>%
+    layer_dense(units = 30, activation = 'relu') %>%
+    layer_dense(units = 40, activation = 'relu') %>%
+    layer_dense(units = input_size, activation = 'linear')  # Adjust based on data
+  
+  # Autoencoder
+  autoencoder <- keras_model(inputs = input_layer, outputs = decoder)
+  
+  # Compile the model
+  autoencoder %>% compile(
+    optimizer = optimizer_adam(0.001),
+    loss = 'mean_squared_error'
+  )
+  
+  # Train the autoencoder
+  autoencoder %>% fit(
+    data_matrix, data_matrix, # since it's an autoencoder, input and output are the same
+    epochs = 70,
+    batch_size = 128,
+    shuffle = TRUE
+  )
+  
+  # Use the autoencoder to reconstruct the data
+  reconstructed_data <- autoencoder %>% predict(data_matrix)
+  
+  error_matrix[i,1] <- median(rowMeans((data_matrix - reconstructed_data)^2))
+  reconstruction_error <- as.data.frame(rowMeans((data_matrix - reconstructed_data)^2))
+  colnames(reconstruction_error)<-"reconstruction_error"
+  
+  reconstructed_data <- t(reconstructed_data)
+  original_sds[is.na(original_sds)] <- 1
+  
+  # Reverse the scaling
+  rescaled_data <- sweep(sweep(reconstructed_data, 2, original_sds, FUN = "*"), 2, original_means, FUN = "+")
+
+  for (j in 1:max(clusters2$mycl)){
+    sample_names2 <- filter(clusters2,clusters2$mycl==j)
+    expt <- trace_table2[,c(which(colnames(trace_table2) %in% sample_names2$`rownames(mycl2)`))]
+    
+    data_matrix2 <- scale(expt)
+    original_means <- attr(data_matrix2, "scaled:center")
+    original_sds <- attr(data_matrix2, "scaled:scale")
+    data_matrix2 <- t(data_matrix2)
+    
+    predicted_data <- autoencoder %>% predict(data_matrix2)
+    
+    error_matrix[i,j+1]<-median(rowMeans((data_matrix2 - predicted_data)^2))
+    prediction_error <- as.data.frame(rowMeans((data_matrix2 - predicted_data)^2))
+    colnames(prediction_error)<-"prediction_error"
+    
+    test1 <- wilcox.test(reconstruction_error$reconstruction_error,prediction_error$prediction_error)
+    p_val_matrix[i,j]<-test1$p.value
+    
+    predicted_data <- t(predicted_data)
+    original_sds[is.na(original_sds)] <- 1
+    
+    # Reverse the scaling
+    rescaled_data <- sweep(sweep(predicted_data, 2, original_sds, FUN = "*"), 2, original_means, FUN = "+")
+  }
+}
+p_val_matrix <- p_val_matrix*bonferroni_factor
+p_val_matrix[p_val_matrix>1]<-1
+
+write.csv(p_val_matrix,paste0(input_path,"/p_val_matrix_",folder1,"_",folder2,".csv"))
+write.csv(error_matrix,paste0(input_path,"/error_matrix_",folder1,"_",folder2,".csv"))
+
+
