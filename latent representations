@@ -1,0 +1,51 @@
+# load dependencies and libraries
+library(tidyverse)
+library(readr)
+library(viridis)
+library(rgl)  
+
+setwd("~/") #sets working directory
+input_path <- "xyz" #file path
+folder <- "abc"
+
+cluster_number=1 #indicate the cluster number
+
+clear3d()
+
+trace_table <- read_csv(paste0(input_path,"/",folder,"/",folder,".csv"))
+trace_table2 <- scale(trace_table[,-c(1:2)])
+
+clusters <- read_csv(paste0(input_path,"/",folder,"/post/",folder,"_post_clusters.csv"))
+
+# set limits for the PC axes
+x_limits <- c(-15, 15)
+y_limits <- c(-15,15)
+z_limits <- c(-15,15)
+
+names1 <- clusters[c(which(clusters$mycl==cluster_number)),2]
+colnames(names1)<-"names"
+trace_table2b <- trace_table2[,c(which(colnames(trace_table2) %in% names1$names))]
+trace_table2b <- trace_table2b
+pca_data_all <- as.data.frame(matrix(0,nrow=0,ncol=4))
+
+
+# appends PC1, PC2, PC3
+
+for (j in 1:1000){
+  trace_table2c<-trace_table2b[,sample(ncol(trace_table2b))]
+  trace_table2c <- trace_table2c[,1:round(0.3*ncol(trace_table2c))]
+  pca <- prcomp(trace_table2c)
+  pca_result <- as.data.frame(pca$x)
+  pca_result <- pca_result[1:3]
+  pca_result <- cbind(trace_table[,2],pca_result)
+  colnames(pca_data_all)<-colnames(pca_result)
+  pca_data_all <- rbind(pca_data_all,pca_result)
+}
+
+#generates movies and stores it in folder
+colors <- viridis(256, alpha = 1,direction = 1, option = "H")[as.numeric(cut(pca_data_all[,1], breaks=256))]
+plot3d(pca_data_all[,-1], type = "p", col = colors, radius = 20, add = FALSE, aspect = c(1,1,1), xlim = x_limits, ylim = y_limits, zlim = z_limits,axes=T)
+movie3d(spin3d(axis = c(0, 0, 1), rpm = 5), duration = 12, dir = getwd(),movie = paste0(folder,"_","cluster_",cluster_number))
+
+
+
