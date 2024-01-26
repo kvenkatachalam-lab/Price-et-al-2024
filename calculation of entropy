@@ -1,0 +1,216 @@
+# load dependencies and libraries
+library(tidyverse)
+library(readr)
+library(rowr)
+
+setwd("~/") #sets working directory
+input_path <- "xyz" #file path
+
+folder1 <- "abc" #control treatment
+cluster1 <- c(1,2) #identify unique clusters
+folder2 <- "mno" #experimental treatment
+cluster2 <- c(1,2) #identify unique clusters
+
+AUC_table1 <- as.data.frame(matrix(NA,nrow=1,ncol=1))
+length_table1 <- as.data.frame(matrix(0,nrow=length(cluster1),ncol=1))
+AUC_table2 <- as.data.frame(matrix(NA,nrow=1,ncol=1))
+length_table2 <- as.data.frame(matrix(0,nrow=length(cluster2),ncol=1))
+
+for (i in 1:length(cluster1)){
+  cluster <- read_csv(paste0(input_path,"/",folder1,"/post/",folder1,"_post_cluster_",cluster1[i],"_AUC.csv"))
+  cluster[,1]<-NULL
+  length_table1[i,]<-nrow(cluster)
+  colnames(cluster)<-c(paste0(folder1,"_cluster",cluster1[i]))
+  AUC_table1 <- as.data.frame(cbind.fill(AUC_table1,cluster,fill = NA))
+}
+
+for (i in 1:length(cluster2)){
+  cluster <- read_csv(paste0(input_path,"/",folder2,"/post/",folder2,"_post_cluster_",cluster2[i],"_AUC.csv"))
+  cluster[,1]<-NULL
+  length_table2[i,]<-nrow(cluster)
+  colnames(cluster)<-c(paste0(folder2,"_cluster",cluster2[i]))
+  AUC_table2 <- as.data.frame(cbind.fill(AUC_table2,cluster,fill = NA))
+}
+
+AUC_table1[,1]<-NULL
+AUC_table2[,1]<-NULL
+
+entropy_vals1 <- as.data.frame(matrix(NA,ncol=5, nrow=length(cluster1)))
+colnames(entropy_vals1)<-c("cluster","positive_prob","negative_prob","entropy","total_entropy")
+
+for (i in 1:ncol(AUC_table1)){
+  area_vals <- as.data.frame(AUC_table1[,i])
+  rem1 <- which(is.na(area_vals[,1])==T)
+  if (is_empty(rem1)==F){
+    area_vals <- as.data.frame(area_vals[-c(rem1),1])
+  }
+  colnames(area_vals)<-"area"
+  pos <- filter(area_vals,area_vals$area>0)
+  neg <- filter(area_vals,area_vals$area<0)
+  pos_sum <- abs(sum(pos[,1]))
+  neg_sum <- abs(sum(neg[,1]))
+  
+  pos_probabilities <- pos_sum/(pos_sum+neg_sum)
+  
+  neg_probabilities <- neg_sum/(pos_sum+neg_sum)
+  entropy_vals1[i,1]<-cluster1[i]
+  entropy_vals1[i,2]<-pos_probabilities
+  entropy_vals1[i,3]<-neg_probabilities
+  
+}
+entropy_vals1[entropy_vals1==0]<-1
+entropy_vals1b<- as.data.frame(entropy_vals1[,2:3])
+entropy <- apply(entropy_vals1b,1,function(x){
+  -sum(x * log2(x))
+})
+entropy_vals1[,4]<-entropy
+entropy_vals1[1,5]<-sum(entropy_vals1$entropy)
+
+
+entropy_vals2 <- as.data.frame(matrix(NA,ncol=5, nrow=length(cluster2)))
+colnames(entropy_vals2)<-c("cluster","positive_prob","negative_prob","entropy","total_entropy")
+
+for (i in 1:ncol(AUC_table2)){
+  area_vals <- as.data.frame(AUC_table2[,i])
+  rem1 <- which(is.na(area_vals[,1])==T)
+  if (is_empty(rem1)==F){
+    area_vals <- as.data.frame(area_vals[-c(rem1),1])
+  }
+  colnames(area_vals)<-"area"
+  pos <- filter(area_vals,area_vals$area>0)
+  neg <- filter(area_vals,area_vals$area<0)
+  pos_sum <- abs(sum(pos[,1]))
+  neg_sum <- abs(sum(neg[,1]))
+  
+  pos_probabilities <- pos_sum/(pos_sum+neg_sum)
+  
+  neg_probabilities <- neg_sum/(pos_sum+neg_sum)
+  entropy_vals2[i,1]<-cluster2[i]
+  entropy_vals2[i,2]<-pos_probabilities
+  entropy_vals2[i,3]<-neg_probabilities
+  
+}
+entropy_vals2[entropy_vals2==0]<-1
+entropy_vals2b<- as.data.frame(entropy_vals2[,2:3])
+entropy <- apply(entropy_vals2b,1,function(x){
+  -sum(x * log2(x))
+})
+entropy_vals2[,4]<-entropy
+entropy_vals2[1,5]<-sum(entropy_vals2$entropy)
+
+entropy_change <- entropy_vals2[1,5]/entropy_vals1[1,5]
+
+
+#the following section performs the bootstrap test
+AUC1 <- data.frame(value=unlist(AUC_table1,use.names = F))
+rem1 <- which(is.na(AUC1[,1])==T)
+if (is_empty(rem1)==F){
+  AUC1 <- as.data.frame(AUC1[-c(rem1),1])
+}
+colnames(AUC1)<-"area"
+AUC2 <- data.frame(value=unlist(AUC_table2,use.names = F))
+rem2 <- which(is.na(AUC2[,1])==T)
+if (is_empty(rem2)==F){
+  AUC2 <- as.data.frame(AUC2[-c(rem2),1])
+}
+colnames(AUC2)<-"area"
+
+AUC <- as.data.frame(rbind(AUC1,AUC2))
+
+random_entropy<-as.data.frame(matrix(0,nrow=1000,ncol=1))
+colnames(random_entropy)<-"random_entropy"
+
+for (j in 1:1000){
+  AUC_random <- as.data.frame(AUC[sample(nrow(AUC)),])
+  random1 <- as.data.frame(matrix(NA,nrow=0,ncol=0))
+  for (k in 1:nrow(length_table1)){
+    pull1 <- AUC_random[1:as.numeric(length_table1[k,]),]
+    AUC_random <- as.data.frame(AUC_random[-c(1:as.numeric(length_table1[k,])),])
+    random1 <- as.data.frame(cbind.fill(random1,pull1,fill = NA))
+  }
+  random1[,1]<-NULL
+  
+  random2 <- as.data.frame(matrix(NA,nrow=0,ncol=0))
+  for (k in 1:nrow(length_table2)){
+    pull1 <- AUC_random[1:as.numeric(length_table2[k,]),]
+    AUC_random <- as.data.frame(AUC_random[-c(1:as.numeric(length_table2[k,])),])
+    random2 <- as.data.frame(cbind.fill(random2,pull1,fill = NA))
+  }
+  random2[,1]<-NULL
+  AUC_table1 <- random1
+  AUC_table2 <- random2
+  entropy_vals1 <- as.data.frame(matrix(NA,ncol=5, nrow=length(cluster1)))
+  colnames(entropy_vals1)<-c("cluster","positive_prob","negative_prob","entropy","total_entropy")
+  
+  for (i in 1:ncol(AUC_table1)){
+    area_vals <- as.data.frame(AUC_table1[,i])
+    rem1 <- which(is.na(area_vals[,1])==T)
+    if (is_empty(rem1)==F){
+      area_vals <- as.data.frame(area_vals[-c(rem1),1])
+    }
+    colnames(area_vals)<-"area"
+    pos <- filter(area_vals,area_vals$area>0)
+    neg <- filter(area_vals,area_vals$area<0)
+    pos_sum <- abs(sum(pos[,1]))
+    neg_sum <- abs(sum(neg[,1]))
+    
+    pos_probabilities <- pos_sum/(pos_sum+neg_sum)
+    
+    neg_probabilities <- neg_sum/(pos_sum+neg_sum)
+    entropy_vals1[i,1]<-cluster1[i]
+    entropy_vals1[i,2]<-pos_probabilities
+    entropy_vals1[i,3]<-neg_probabilities
+    
+  }
+  entropy_vals1[entropy_vals1==0]<-1
+  entropy_vals1b<- as.data.frame(entropy_vals1[,2:3])
+  entropy <- apply(entropy_vals1b,1,function(x){
+    -sum(x * log2(x))
+  })
+  entropy_vals1[,4]<-entropy
+  entropy_vals1[1,5]<-sum(entropy_vals1$entropy)
+  
+  
+  entropy_vals2 <- as.data.frame(matrix(NA,ncol=5, nrow=length(cluster2)))
+  colnames(entropy_vals2)<-c("cluster","positive_prob","negative_prob","entropy","total_entropy")
+  
+  for (i in 1:ncol(AUC_table2)){
+    area_vals <- as.data.frame(AUC_table2[,i])
+    rem1 <- which(is.na(area_vals[,1])==T)
+    if (is_empty(rem1)==F){
+      area_vals <- as.data.frame(area_vals[-c(rem1),1])
+    }
+    colnames(area_vals)<-"area"
+    pos <- filter(area_vals,area_vals$area>0)
+    neg <- filter(area_vals,area_vals$area<0)
+    pos_sum <- abs(sum(pos[,1]))
+    neg_sum <- abs(sum(neg[,1]))
+    
+    pos_probabilities <- pos_sum/(pos_sum+neg_sum)
+    
+    neg_probabilities <- neg_sum/(pos_sum+neg_sum)
+    entropy_vals2[i,1]<-cluster2[i]
+    entropy_vals2[i,2]<-pos_probabilities
+    entropy_vals2[i,3]<-neg_probabilities
+    
+  }
+  entropy_vals2[entropy_vals2==0]<-1
+  entropy_vals2b<- as.data.frame(entropy_vals2[,2:3])
+  entropy <- apply(entropy_vals2b,1,function(x){
+    -sum(x * log2(x))
+  })
+  entropy_vals2[,4]<-entropy
+  entropy_vals2[1,5]<-sum(entropy_vals2$entropy)
+  
+  entropy_change_random <- entropy_vals2[1,5]/entropy_vals1[1,5]
+  random_entropy[j,]<-entropy_change_random
+}
+final_data <- as.data.frame(matrix(0,nrow=1,ncol=3))
+colnames(final_data) <- c("entropy_change","bootstrap_entropy","p_value")
+final_data[1,1]<-entropy_change
+final_data[1,2]<-median(random_entropy$random_entropy)
+final_data[1,3]<-(sum(random_entropy$random_entropy>entropy_change))/1000
+
+write.csv(final_data,paste0(input_path,"/all_clusters_entropy_",folder2,".csv"))
+write.csv(random_entropy,paste0(input_path,"/all_clusters_random_entropy_",folder2,".csv"))
+
