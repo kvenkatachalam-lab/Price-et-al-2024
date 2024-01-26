@@ -6,10 +6,10 @@ library(tensorflow)
 
 
 setwd("~/") #sets working directory
-input_path <- "Dropbox/Kartik/Ongoing projects/Live cell imaging analyses/Matt data/Laconic/correlation csv_no bleach" #file path
-folder1 <- "low K -> low K no asp" #control treatment
-folder2 <- "low K -> UK no asp" #experimental treatment
-bonferroni_factor <- 21 #to adjust for pairwise corrections
+input_path <- "xyz" #file path
+folder1 <- "abc" #control treatment
+folder2 <- "mno" #experimental treatment
+bonferroni_factor <- 15 #to adjust for pairwise corrections
 
 trace_table1 <- read_csv(paste0(input_path,"/",folder1,"/",folder1,".csv"))
 clusters1 <- read_csv(paste0(input_path,"/",folder1,"/post/",folder1,"_post_clusters.csv")) # this line uses a file that indicates cluster membership for the individual cells
